@@ -1,0 +1,435 @@
+From b07dfc27e7304105a27510be8bf2f1ccb87d20c6 Mon Sep 17 00:00:00 2001
+From: Alexander Martinkevich <alexander.martinkevich@hawksearch.com>
+Date: Mon, 14 Dec 2020 18:11:39 +0300
+Subject: [PATCH] Create HttpAdapter for Zend_Uri_Http class implementing
+ UriInterface. Add compatibility for Magento less than 2.3.5
+
+---
+ Helper/Url.php           |   2 +-
+ Zend/Uri/HttpAdapter.php | 401 +++++++++++++++++++++++++++++++++++++++
+ 2 files changed, 402 insertions(+), 1 deletion(-)
+ create mode 100644 Zend/Uri/HttpAdapter.php
+
+diff --git a/app/code/HawkSearch/Connector/Helper/Url.php b/app/code/HawkSearch/Connector/Helper/Url.php
+index b3ab0bc..c622da8 100644
+--- a/app/code/HawkSearch/Connector/Helper/Url.php
++++ b/app/code/HawkSearch/Connector/Helper/Url.php
+@@ -15,7 +15,7 @@ declare(strict_types=1);
+ 
+ namespace HawkSearch\Connector\Helper;
+ 
+-use Laminas\Diactoros\UriFactory as LaminasUriFactory;
++use HawkSearch\Connector\Zend\Uri\HttpAdapterFactory as LaminasUriFactory;
+ use Psr\Http\Message\UriInterface;
+ 
+ class Url
+diff --git a/app/code/HawkSearch/Connector/Zend/Uri/HttpAdapter.php b/app/code/HawkSearch/Connector/Zend/Uri/HttpAdapter.php
+new file mode 100644
+index 0000000..a88deb5
+--- /dev/null
++++ b/app/code/HawkSearch/Connector/Zend/Uri/HttpAdapter.php
+@@ -0,0 +1,401 @@
++<?php
++/**
++ * Copyright (c) 2020 Hawksearch (www.hawksearch.com) - All Rights Reserved
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
++ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
++ * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
++ * IN THE SOFTWARE.
++ */
++
++declare(strict_types=1);
++
++namespace HawkSearch\Connector\Zend\Uri;
++
++use Psr\Http\Message\UriInterface;
++use Zend_Uri_Exception;
++use Zend_Uri_Http;
++
++class HttpAdapter implements UriInterface
++{
++    /**
++     * @var Zend_Uri_Http
++     */
++    private $service;
++
++    /**
++     * @var int[] Array indexed by valid scheme names to their corresponding ports.
++     */
++    protected $allowedSchemes = [
++        'http'  => 80,
++        'https' => 443,
++    ];
++
++    /**
++     * HttpAdapter constructor.
++     * @param string $uri
++     * @throws Zend_Uri_Exception
++     */
++    public function __construct($uri = '')
++    {
++        if ('' === $uri) {
++            return;
++        }
++
++        $this->service = Zend_Uri_Http::factory($uri);
++    }
++
++    /**
++     * @inheritDoc
++     */
++    public function getAuthority()
++    {
++        if ('' === $this->service->getHost()) {
++            return '';
++        }
++
++        $authority = $this->service->getHost();
++        $userInfo = $this->getUserInfo();
++
++        if ('' !== $userInfo) {
++            $authority = $userInfo . '@' . $authority;
++        }
++
++        if ($this->isNonStandardPort(
++            $this->service->getScheme(),
++            $this->service->getHost(),
++            $this->service->getPort()
++        )
++        ) {
++            $authority .= ':' . $this->service->getPort();
++        }
++
++        return $authority;
++    }
++
++    /**
++     * @inheritDoc
++     */
++    public function getUserInfo()
++    {
++        return $this->service->getUsername() . strlen($this->service->getPassword()) > 0
++            ? ":{$this->service->getPassword()}"
++            : '';
++    }
++
++    /**
++     * @inheritDoc
++     */
++    public function getScheme()
++    {
++        return $this->service->getScheme();
++    }
++
++    /**
++     * @inheritDoc
++     */
++    public function getHost()
++    {
++        return $this->service->getHost();
++    }
++
++    /**
++     * @inheritDoc
++     */
++    public function getPort()
++    {
++        return $this->service->getPort();
++    }
++
++    /**
++     * @inheritDoc
++     */
++    public function getPath()
++    {
++        return $this->service->getPath();
++    }
++
++    /**
++     * @inheritDoc
++     */
++    public function getQuery()
++    {
++        return $this->service->getQuery();
++    }
++
++    /**
++     * @inheritDoc
++     */
++    public function getFragment()
++    {
++        return $this->service->getFragment();
++    }
++
++    /**
++     * @inheritDoc
++     */
++    public function __toString()
++    {
++        return $this->service->__toString();
++    }
++
++    /**
++     * @inheritDoc
++     */
++    public function withScheme($scheme)
++    {
++        // Changing the scheme is not supported
++        return $this;
++    }
++
++    /**
++     * @inheritDoc
++     * @throws Zend_Uri_Exception
++     */
++    public function withUserInfo($user, $password = null)
++    {
++        if ($this->service->validateUsername($user) === false) {
++            throw new Zend_Uri_Exception("Username \"$user\" is not a valid HTTP username");
++        }
++
++        if ($this->service->validatePassword($password) === false) {
++            throw new Zend_Uri_Exception("Password \"$password\" is not a valid HTTP password.");
++        }
++
++        $info = $user;
++        if (null !== $password) {
++            $info .= ':' . $password;
++        }
++
++        if ($info === $this->getUserInfo()) {
++            // Do nothing if no change was made.
++            return $this;
++        }
++
++        $new = clone $this;
++        $new->setUsername($user);
++        $new->setPassword($password);
++
++        return $new;
++    }
++
++    /**
++     * @inheritDoc
++     * @throws Zend_Uri_Exception
++     */
++    public function withHost($host)
++    {
++        if ($this->service->validateHost($host) === false) {
++            throw new Zend_Uri_Exception("Host \"$host\" is not a valid HTTP host");
++        }
++
++        if ($host === $this->service->getHost()) {
++            // Do nothing if no change was made.
++            return $this;
++        }
++
++        $new = clone $this;
++        $new->setHost(strtolower($host));
++
++        return $new;
++    }
++
++    /**
++     * @inheritDoc
++     * @throws Zend_Uri_Exception
++     */
++    public function withPort($port)
++    {
++        if ($this->service->validatePort($port) === false) {
++            throw new Zend_Uri_Exception("Port \"$port\" is not a valid HTTP port.");
++        }
++
++        if ($port === $this->service->getPort()) {
++            // Do nothing if no change was made.
++            return $this;
++        }
++
++        $new = clone $this;
++        $new->setPort($port);
++
++        return $new;
++    }
++
++    /**
++     * @inheritDoc
++     * @throws Zend_Uri_Exception
++     */
++    public function withPath($path)
++    {
++        $path = $this->filterPath($path);
++        if ($this->service->validatePath($path) === false) {
++            throw new Zend_Uri_Exception("Path \"$path\" is not a valid HTTP path");
++        }
++
++        if ($path === $this->service->getPath()) {
++            // Do nothing if no change was made.
++            return $this;
++        }
++
++        $new = clone $this;
++        $new->setPath($path);
++
++        return $new;
++    }
++
++    /**
++     * @inheritDoc
++     * @throws Zend_Uri_Exception
++     */
++    public function withQuery($query)
++    {
++        if ($this->service->validateQuery($query) === false) {
++            #require_once 'Zend/Uri/Exception.php';
++            throw new Zend_Uri_Exception("'$query' is not a valid query string");
++        }
++
++        if ($query === $this->service->getQuery()) {
++            // Do nothing if no change was made.
++            return $this;
++        }
++
++        $new = clone $this;
++        $new->setQuery($query);
++
++        return $new;
++    }
++
++    /**
++     * @inheritDoc
++     * @throws Zend_Uri_Exception
++     */
++    public function withFragment($fragment)
++    {
++        if ($this->service->validateFragment($fragment) === false) {
++            #require_once 'Zend/Uri/Exception.php';
++            throw new Zend_Uri_Exception("Fragment \"$fragment\" is not a valid HTTP fragment");
++        }
++
++
++        if ($fragment === $this->service->getFragment()) {
++            // Do nothing if no change was made.
++            return $this;
++        }
++
++        $new = clone $this;
++        $new->setFragment($fragment);
++
++        return $new;
++    }
++
++    /**
++     * Is a given port non-standard for the current scheme?
++     *
++     * @param string $scheme
++     * @param string $host
++     * @param int $port
++     * @return bool
++     */
++    private function isNonStandardPort($scheme, $host, $port)
++    {
++        if ('' === $scheme) {
++            return '' === $host || null !== $port;
++        }
++
++        if ('' === $host || null === $port) {
++            return false;
++        }
++
++        return ! isset($this->allowedSchemes[$scheme]) || $port !== $this->allowedSchemes[$scheme];
++    }
++
++    /**
++     * @param string $user
++     * @return string
++     * @throws Zend_Uri_Exception
++     */
++    private function setUsername(string $user)
++    {
++        return $this->service->setUsername($user);
++    }
++
++    /**
++     * @param string $fragment
++     * @return string
++     * @throws Zend_Uri_Exception
++     */
++    private function setFragment(string $fragment)
++    {
++        return $this->service->setFragment($fragment);
++    }
++
++    /**
++     * @param string $query
++     * @return string
++     * @throws Zend_Uri_Exception
++     */
++    private function setQuery(string $query)
++    {
++        return $this->service->setQuery($query);
++    }
++
++    /**
++     * @param string $path
++     * @return string
++     * @throws Zend_Uri_Exception
++     */
++    private function setPath(string $path)
++    {
++        return $this->service->setPath($this->filterPath($path));
++    }
++
++    /**
++     * @param int|null $port
++     * @return string
++     * @throws Zend_Uri_Exception
++     */
++    private function setPort(?int $port)
++    {
++        return $this->service->setPort($port);
++    }
++
++    /**
++     * @param string $host
++     * @return string
++     * @throws Zend_Uri_Exception
++     */
++    private function setHost(string $host)
++    {
++        return $this->service->setHost($host);
++    }
++
++    /**
++     * @param string $password
++     * @return string
++     * @throws Zend_Uri_Exception
++     */
++    private function setPassword(string $password)
++    {
++        return $this->service->setPassword($password);
++    }
++
++    /**
++     * Filters the path of a URI to ensure it is properly encoded.
++     *
++     * @param string $path
++     * @return string
++     */
++    private function filterPath($path)
++    {
++        if ('' === $path) {
++            // No path
++            return '/';
++        }
++
++        // Ensure only one leading slash, to prevent XSS attempts.
++        return '/' . ltrim($path, '/');
++    }
++}
+-- 
+2.17.2 (Apple Git-113)
+
