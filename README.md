@@ -13,6 +13,6 @@ Download the [patch file](https://github.com/hawksearch/magento-2-patches/blob/m
 
 If the command `patch` doesn't work try this one
 ```
-git-apply hawksearch_connector_2.4_magento_2.3.0-2.3.4-p2_compatibility_patch_cli.patch
+git apply hawksearch_connector_2.4_magento_2.3.0-2.3.4-p2_compatibility_patch_cli.patch
 ```
 
