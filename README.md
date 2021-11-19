@@ -8,7 +8,7 @@ Since "hawksearch/connector" composer package of version 2.4.* doesn't support M
 
 ### How to apply patch
 
-Download the [patch file](https://github.com/hawksearch/magento-2-patches/blob/main/hawksearch_connector_2.4_magento_2.3.0-2.3.4-p2_compatibility_patch_cli.patch) and apply it using one of commands bellow
+Download the [patch file](https://raw.githubusercontent.com/hawksearch/magento-2-patches/main/hawksearch_connector_2.4_magento_2.3.0-2.3.4-p2_compatibility_patch_cli.patch) and apply it using one of commands bellow
 
 ```
 patch -p1 < hawksearch_connector_2.4_magento_2.3.0-2.3.4-p2_compatibility_patch_cli.patch
